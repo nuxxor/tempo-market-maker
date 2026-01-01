@@ -11,7 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { type TokenSymbol, config } from './config.js';
-import { getMakerOrders, getOrder } from './dex.js';
+import { getOrder } from './dex.js';
 import { logger } from './logger.js';
 import { type OrderInfo, orderIdToString, stringToOrderId } from './types.js';
 
@@ -389,8 +389,11 @@ export async function reconcileOrders(
 }
 
 /**
- * Full chain reconciliation - fetch all maker orders and sync state
+ * Full chain reconciliation - verify state's orders still exist on chain
  * Use this on startup or after suspected state corruption
+ *
+ * Note: We can't query all maker orders because dex_getOrders RPC doesn't return
+ * our orders reliably. Instead, we verify each order in state using getOrder.
  */
 export async function fullReconcile(
   state: EngineState,
@@ -403,72 +406,83 @@ export async function fullReconcile(
 }> {
   const pairState = getPairState(state, base, quote);
 
-  // Fetch all maker orders for this base token from chain
-  const chainOrders = await getMakerOrders(base);
-
-  logger.info('state', {
-    message: `Full reconcile: found ${chainOrders.length} orders on chain`,
-    baseToken: base,
-  });
-
   let foundBid: OrderInfo | null = null;
   let foundAsk: OrderInfo | null = null;
-  const orphanedOrders: OrderInfo[] = [];
 
-  for (const order of chainOrders) {
-    const orderIdStr = orderIdToString(order.orderId);
-
-    // Check if this is our tracked bid
-    if (pairState.bidOrderId === orderIdStr && order.isBid) {
-      foundBid = order;
-      continue;
+  // Check bid order via getOrder
+  if (pairState.bidOrderId) {
+    try {
+      const orderId = stringToOrderId(pairState.bidOrderId);
+      const order = await getOrder(orderId);
+      if (order && order.remainingAmount > 0n) {
+        foundBid = order;
+        pairState.lastBidTick = order.tick;
+        pairState.lastBidFlipTick = order.flipTick;
+        logger.debug('state', {
+          message: `Bid order ${pairState.bidOrderId} verified on chain`,
+          remaining: order.remainingAmount.toString(),
+        });
+      } else {
+        logger.warn('state', {
+          message: `Bid order ${pairState.bidOrderId} not found on chain, clearing`,
+        });
+        pairState.bidOrderId = null;
+        pairState.lastBidTick = null;
+        pairState.lastBidFlipTick = null;
+      }
+    } catch {
+      logger.warn('state', {
+        message: `Bid order ${pairState.bidOrderId} not found on chain, clearing`,
+      });
+      pairState.bidOrderId = null;
+      pairState.lastBidTick = null;
+      pairState.lastBidFlipTick = null;
     }
+  }
 
-    // Check if this is our tracked ask
-    if (pairState.askOrderId === orderIdStr && !order.isBid) {
-      foundAsk = order;
-      continue;
+  // Check ask order via getOrder
+  if (pairState.askOrderId) {
+    try {
+      const orderId = stringToOrderId(pairState.askOrderId);
+      const order = await getOrder(orderId);
+      if (order && order.remainingAmount > 0n) {
+        foundAsk = order;
+        pairState.lastAskTick = order.tick;
+        pairState.lastAskFlipTick = order.flipTick;
+        logger.debug('state', {
+          message: `Ask order ${pairState.askOrderId} verified on chain`,
+          remaining: order.remainingAmount.toString(),
+        });
+      } else {
+        logger.warn('state', {
+          message: `Ask order ${pairState.askOrderId} not found on chain, clearing`,
+        });
+        pairState.askOrderId = null;
+        pairState.lastAskTick = null;
+        pairState.lastAskFlipTick = null;
+      }
+    } catch {
+      logger.warn('state', {
+        message: `Ask order ${pairState.askOrderId} not found on chain, clearing`,
+      });
+      pairState.askOrderId = null;
+      pairState.lastAskTick = null;
+      pairState.lastAskFlipTick = null;
     }
-
-    // This is an orphaned order (not in our state)
-    orphanedOrders.push(order);
-    logger.warn('state', {
-      message: `Found orphaned order on chain`,
-      orderId: orderIdStr,
-      isBid: order.isBid,
-      tick: order.tick,
-    });
   }
 
-  // Update state if we found matching orders
-  if (foundBid) {
-    pairState.lastBidTick = foundBid.tick;
-    pairState.lastBidFlipTick = foundBid.flipTick;
-  } else if (pairState.bidOrderId) {
-    logger.warn('state', {
-      message: `Bid order ${pairState.bidOrderId} not found on chain, clearing`,
-    });
-    pairState.bidOrderId = null;
-    pairState.lastBidTick = null;
-    pairState.lastBidFlipTick = null;
-  }
-
-  if (foundAsk) {
-    pairState.lastAskTick = foundAsk.tick;
-    pairState.lastAskFlipTick = foundAsk.flipTick;
-  } else if (pairState.askOrderId) {
-    logger.warn('state', {
-      message: `Ask order ${pairState.askOrderId} not found on chain, clearing`,
-    });
-    pairState.askOrderId = null;
-    pairState.lastAskTick = null;
-    pairState.lastAskFlipTick = null;
-  }
+  const foundCount = (foundBid ? 1 : 0) + (foundAsk ? 1 : 0);
+  logger.info('state', {
+    message: `Full reconcile: verified ${foundCount} orders on chain`,
+    baseToken: base,
+  });
 
   pairState.updatedAt = new Date().toISOString();
   saveState(state);
 
-  return { foundBid, foundAsk, orphanedOrders };
+  // Note: We can't detect orphaned orders since dex_getOrders doesn't work
+  // Orphaned orders will eventually fill or be cancelled manually
+  return { foundBid, foundAsk, orphanedOrders: [] };
 }
 
 /**

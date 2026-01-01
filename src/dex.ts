@@ -371,46 +371,72 @@ export async function ensurePairExists(baseToken: TokenSymbol): Promise<boolean>
 
 /**
  * Get all open orders for maker via RPC
- * Uses dex_getOrders if available
+ * Uses dex_getOrders with pagination and filters by maker address client-side
  */
 export async function getMakerOrders(baseToken?: TokenSymbol): Promise<OrderInfo[]> {
   const client = getPublicClientHttp();
-  const makerAddress = getMakerAddress();
+  const makerAddress = getMakerAddress().toLowerCase();
+  const baseTokenAddress = baseToken ? getTokenAddress(baseToken).toLowerCase() : undefined;
+
+  const allOrders: OrderInfo[] = [];
+  let cursor: string | undefined = undefined;
+  const maxPages = 50; // Safety limit to prevent infinite loops
+  let page = 0;
 
   try {
-    // Try Tempo-specific RPC method
-    const result = await client.request({
-      method: 'dex_getOrders',
-      params: [
-        {
-          maker: makerAddress,
-          baseToken: baseToken ? getTokenAddress(baseToken) : undefined,
-        } as unknown,
-      ],
-    } as any);
+    // Paginate through all orders
+    while (page < maxPages) {
+      const params: Record<string, unknown> = {};
+      if (cursor) {
+        params.cursor = cursor;
+      }
 
-    // Parse result into OrderInfo array
-    if (Array.isArray(result)) {
-      return result.map((order: any) => ({
-        orderId: BigInt(order.orderId),
-        maker: order.maker,
-        baseToken: order.baseToken || order.bookKey,
-        quoteToken: order.quoteToken || '0x20c0000000000000000000000000000000000000',
-        isBid: order.isBid,
-        isFlip: order.isFlip,
-        tick: Number(order.tick),
-        flipTick: order.isFlip ? Number(order.flipTick) : null,
-        amount: BigInt(order.amount),
-        remainingAmount: BigInt(order.remaining),
-        status: BigInt(order.remaining) === 0n ? 'filled' : 'open',
-      }));
+      const result = await client.request({
+        method: 'dex_getOrders',
+        params: [params],
+      } as any) as { orders: any[]; nextCursor?: string };
+
+      if (!result || !result.orders || result.orders.length === 0) {
+        break;
+      }
+
+      // Filter and add matching orders
+      for (const order of result.orders) {
+        if (order.maker?.toLowerCase() !== makerAddress) continue;
+        if (baseTokenAddress && order.baseToken?.toLowerCase() !== baseTokenAddress) continue;
+
+        allOrders.push({
+          orderId: BigInt(order.orderId),
+          maker: order.maker,
+          baseToken: order.baseToken || order.bookKey,
+          quoteToken: order.quoteToken || '0x20c0000000000000000000000000000000000000',
+          isBid: order.isBid,
+          isFlip: order.isFlip,
+          tick: Number(order.tick),
+          flipTick: order.isFlip ? Number(order.flipTick) : null,
+          amount: BigInt(order.amount),
+          remainingAmount: BigInt(order.remaining),
+          status: BigInt(order.remaining) === 0n ? 'filled' : 'open',
+        });
+      }
+
+      // Check for next page
+      if (!result.nextCursor) {
+        break;
+      }
+      cursor = result.nextCursor;
+      page++;
     }
-  } catch {
-    // RPC method not available
+
     logger.debug('preflight', {
-      message: 'dex_getOrders RPC method not available',
+      message: `dex_getOrders: scanned ${page + 1} pages, found ${allOrders.length} maker orders`,
+    });
+  } catch (error) {
+    logger.debug('preflight', {
+      message: 'dex_getOrders RPC failed',
+      error: error instanceof Error ? error.message : 'Unknown',
     });
   }
 
-  return [];
+  return allOrders;
 }

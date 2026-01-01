@@ -12,15 +12,13 @@
  * - TX budget enforcement
  */
 
-import { type Hash, type Log } from 'viem';
+import { type Hash } from 'viem';
 import { config, type TokenSymbol } from './config.js';
-import { getMakerAddress, getPublicClientHttp } from './client.js';
+import { getMakerAddress } from './client.js';
 import { logger } from './logger.js';
 import {
   placeFlipOrder,
-  cancelOrder,
   ensurePairExists,
-  getMakerOrders,
   getOrder,
 } from './dex.js';
 import {
@@ -29,7 +27,6 @@ import {
   formatQuoteParams,
   formatInventory,
   canQuotePair,
-  hasFlipBuffer,
   type QuoteParams,
 } from './strategy.js';
 import {
@@ -328,6 +325,8 @@ async function quotePair(
 
 /**
  * Check order status and detect fills
+ * Note: We can't reliably track flip order IDs because dex_getOrders doesn't return our orders.
+ * When a flip order fills, we log it and clear the order ID. A new order will be placed on the next cycle.
  */
 async function checkOrderStatus(
   ctx: EngineContext,
@@ -336,16 +335,12 @@ async function checkOrderStatus(
 ): Promise<{
   bidFilled: boolean;
   askFilled: boolean;
-  bidFlipOk: boolean;
-  askFlipOk: boolean;
 }> {
   const pairState = getPairState(ctx.state, base, quote);
   const key = pairKey(base, quote);
 
   let bidFilled = false;
   let askFilled = false;
-  let bidFlipOk = true;
-  let askFlipOk = true;
 
   // Check bid order
   if (pairState.bidOrderId) {
@@ -353,37 +348,25 @@ async function checkOrderStatus(
       const order = await getOrder(BigInt(pairState.bidOrderId));
       if (!order || order.remainingAmount === 0n) {
         bidFilled = true;
+        const wasFlip = order?.isFlip || false;
+
         logger.info('engine', {
           message: `Bid order filled`,
           orderId: pairState.bidOrderId,
           pair: key,
+          wasFlip,
         });
 
-        // Check if flip happened (look for new ask at flipTick)
-        if (order?.isFlip && pairState.lastBidFlipTick !== null) {
-          const flippedOrders = await getMakerOrders(base);
-          const flippedAsk = flippedOrders.find(
-            o => !o.isBid && o.tick === pairState.lastBidFlipTick
-          );
-
-          if (flippedAsk) {
-            logger.info('engine', {
-              message: `Bid flipped to ask successfully`,
-              newOrderId: orderIdToString(flippedAsk.orderId),
-              tick: flippedAsk.tick,
-            });
-            updatePairOrders(ctx.state, base, quote, {
-              askOrderId: orderIdToString(flippedAsk.orderId),
-              lastAskTick: flippedAsk.tick,
-              lastAskFlipTick: flippedAsk.flipTick,
-            });
-          } else {
-            bidFlipOk = false;
-            logger.warn('engine', {
-              message: `Bid flip failed - no ask found at flipTick`,
-              expectedTick: pairState.lastBidFlipTick,
-            });
-          }
+        // For flip orders, log that flip should have occurred
+        // Note: We can't track the new order ID because dex_getOrders doesn't return our orders
+        // The flip mechanism works atomically on-chain, we just can't query the new ID
+        if (wasFlip && pairState.lastBidFlipTick !== null) {
+          logger.info('engine', {
+            message: `Bid flip order filled → ask should be at flipTick (atomic on-chain)`,
+            flipTick: pairState.lastBidFlipTick,
+          });
+          // Note: New ask order ID is unknown - will place fresh order on next cycle if needed
+          // This may create duplicate orders but is safer than assuming flip failed
         }
 
         // Clear old bid order ID
@@ -404,37 +387,25 @@ async function checkOrderStatus(
       const order = await getOrder(BigInt(pairState.askOrderId));
       if (!order || order.remainingAmount === 0n) {
         askFilled = true;
+        const wasFlip = order?.isFlip || false;
+
         logger.info('engine', {
           message: `Ask order filled`,
           orderId: pairState.askOrderId,
           pair: key,
+          wasFlip,
         });
 
-        // Check if flip happened (look for new bid at flipTick)
-        if (order?.isFlip && pairState.lastAskFlipTick !== null) {
-          const flippedOrders = await getMakerOrders(base);
-          const flippedBid = flippedOrders.find(
-            o => o.isBid && o.tick === pairState.lastAskFlipTick
-          );
-
-          if (flippedBid) {
-            logger.info('engine', {
-              message: `Ask flipped to bid successfully`,
-              newOrderId: orderIdToString(flippedBid.orderId),
-              tick: flippedBid.tick,
-            });
-            updatePairOrders(ctx.state, base, quote, {
-              bidOrderId: orderIdToString(flippedBid.orderId),
-              lastBidTick: flippedBid.tick,
-              lastBidFlipTick: flippedBid.flipTick,
-            });
-          } else {
-            askFlipOk = false;
-            logger.warn('engine', {
-              message: `Ask flip failed - no bid found at flipTick`,
-              expectedTick: pairState.lastAskFlipTick,
-            });
-          }
+        // For flip orders, log that flip should have occurred
+        // Note: We can't track the new order ID because dex_getOrders doesn't return our orders
+        // The flip mechanism works atomically on-chain, we just can't query the new ID
+        if (wasFlip && pairState.lastAskFlipTick !== null) {
+          logger.info('engine', {
+            message: `Ask flip order filled → bid should be at flipTick (atomic on-chain)`,
+            flipTick: pairState.lastAskFlipTick,
+          });
+          // Note: New bid order ID is unknown - will place fresh order on next cycle if needed
+          // This may create duplicate orders but is safer than assuming flip failed
         }
 
         // Clear old ask order ID
@@ -449,62 +420,9 @@ async function checkOrderStatus(
     }
   }
 
-  return { bidFilled, askFilled, bidFlipOk, askFlipOk };
+  return { bidFilled, askFilled };
 }
 
-/**
- * Handle flip failure - diagnose and log
- * Note: Tempo DEX doesn't have deposit functionality, so recovery is not possible.
- * The flip will succeed on the next fill when internal balance is available.
- */
-async function handleFlipFailure(
-  ctx: EngineContext,
-  base: TokenSymbol,
-  quote: TokenSymbol,
-  side: 'bid' | 'ask'
-): Promise<void> {
-  const key = pairKey(base, quote);
-
-  // Diagnose the issue by checking inventory with buffer
-  const inventory = await getInventoryState(base, quote);
-  const params = await getQuoteParams(base, quote);
-  const flipCheck = hasFlipBuffer(inventory, params.orderSize);
-
-  let failReason = 'unknown';
-
-  // Check if internal balance is insufficient for flip (includes MIN_INTERNAL_BUFFER)
-  if (side === 'bid' && !flipCheck.quoteOk) {
-    failReason = 'insufficientInternal_quote';
-    logger.warn('engine', {
-      message: `Flip failed: insufficient ${quote} internal balance (includes buffer)`,
-      have: inventory.quoteDex.toString(),
-      missing: flipCheck.quoteMissing.toString(),
-    });
-  } else if (side === 'ask' && !flipCheck.baseOk) {
-    failReason = 'insufficientInternal_base';
-    logger.warn('engine', {
-      message: `Flip failed: insufficient ${base} internal balance (includes buffer)`,
-      have: inventory.baseDex.toString(),
-      missing: flipCheck.baseMissing.toString(),
-    });
-  }
-
-  logger.txFailed({
-    reason: 'flipFailed',
-    pair: key,
-    side,
-    error: failReason,
-  });
-
-  // Note: Tempo DEX pulls directly from wallet with approval.
-  // Flip orders use internal balance which accumulates from fills.
-  // No manual deposit/recovery possible - flip will work once balance builds up.
-  logger.info('engine', {
-    message: 'Flip recovery not possible - Tempo DEX has no deposit function. Will retry on next cycle.',
-    pair: key,
-    side,
-  });
-}
 
 /**
  * Sleep helper
@@ -533,17 +451,9 @@ async function runLoop(ctx: EngineContext): Promise<void> {
 
       try {
         // 1. Check order status and detect fills
-        const status = await checkOrderStatus(ctx, pair.base, pair.quote);
+        await checkOrderStatus(ctx, pair.base, pair.quote);
 
-        // 2. Handle flip failures
-        if (status.bidFilled && !status.bidFlipOk) {
-          await handleFlipFailure(ctx, pair.base, pair.quote, 'bid');
-        }
-        if (status.askFilled && !status.askFlipOk) {
-          await handleFlipFailure(ctx, pair.base, pair.quote, 'ask');
-        }
-
-        // 3. Place/refresh quotes if needed
+        // 2. Place/refresh quotes if needed
         await quotePair(ctx, pair.base, pair.quote);
 
       } catch (error) {
