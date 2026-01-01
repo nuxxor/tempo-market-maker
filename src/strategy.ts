@@ -143,12 +143,10 @@ export function hasFlipBuffer(inventory: InventoryState, orderSize: bigint): {
   quoteMissing: bigint;
 } {
   // Parse minimum buffer from config, using correct decimals for each token
-  const baseBuffer = BigInt(
-    Math.floor(parseFloat(config.MIN_INTERNAL_BUFFER_HUMAN) * (10 ** inventory.baseDecimals))
-  );
-  const quoteBuffer = BigInt(
-    Math.floor(parseFloat(config.MIN_INTERNAL_BUFFER_HUMAN) * (10 ** inventory.quoteDecimals))
-  );
+  // Use BigInt exponentiation to avoid precision loss with high decimals (e.g., 18)
+  const bufferHuman = BigInt(Math.floor(parseFloat(config.MIN_INTERNAL_BUFFER_HUMAN)));
+  const baseBuffer = bufferHuman * (10n ** BigInt(inventory.baseDecimals));
+  const quoteBuffer = bufferHuman * (10n ** BigInt(inventory.quoteDecimals));
 
   // For flip orders, we need internal balance >= order size + buffer
   const requiredBase = orderSize + baseBuffer;

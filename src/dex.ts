@@ -74,8 +74,16 @@ export async function getOrder(orderId: bigint): Promise<OrderInfo | null> {
   } catch (error) {
     // Check for OrderDoesNotExist contract revert (order was filled/cancelled)
     if (error instanceof ContractFunctionExecutionError) {
-      const cause = error.cause as { data?: { errorName?: string } } | undefined;
+      const cause = error.cause as { data?: { errorName?: string }; details?: string } | undefined;
+
+      // Primary: use viem's parsed errorName
       if (cause?.data?.errorName === 'OrderDoesNotExist') {
+        return null;
+      }
+
+      // Fallback: check details/message for RPCs that don't parse errorName
+      const errorMsg = error.message || cause?.details || '';
+      if (errorMsg.includes('OrderDoesNotExist')) {
         return null;
       }
     }
