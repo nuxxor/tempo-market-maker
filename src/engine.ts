@@ -20,16 +20,12 @@ import {
   placeFlipOrder,
   cancelOrder,
   ensurePairExists,
-  getDexBalance,
-  depositToDex,
   getMakerOrders,
   getOrder,
 } from './dex.js';
 import {
   getQuoteParams,
   getInventoryState,
-  checkRebalance,
-  hasFlipBuffer,
   formatQuoteParams,
   formatInventory,
   canQuotePair,
@@ -202,34 +198,9 @@ async function quotePair(
     params: formatQuoteParams(params),
   });
 
-  // Check if rebalance needed
-  const rebalance = await checkRebalance(base, quote);
-  if (rebalance.needed && rebalance.action && rebalance.amount) {
-    logger.info('engine', {
-      message: `Rebalance needed: ${rebalance.reason}`,
-      action: rebalance.action,
-    });
-
-    // Execute rebalance deposit if needed
-    if (rebalance.action === 'deposit_base' || rebalance.action === 'deposit_quote') {
-      const token = rebalance.action === 'deposit_base' ? base : quote;
-      try {
-        const result = await depositToDex(token, rebalance.amount);
-        if (result) {
-          incrementTxCounter(ctx.state, false);
-          logger.txSuccess({
-            reason: 'rebalance',
-            txHash: result.txHash,
-          });
-        }
-      } catch (error) {
-        logger.txFailed({
-          reason: 'rebalance',
-          error: error instanceof Error ? error.message : 'Unknown',
-        });
-      }
-    }
-  }
+  // Note: Tempo DEX doesn't require explicit deposits
+  // Orders are placed directly from wallet with approval
+  // Flip order proceeds automatically go to internal balance
 
   let bidPlaced = false;
   let askPlaced = false;
