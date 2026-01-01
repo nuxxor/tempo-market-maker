@@ -10,7 +10,7 @@
  * Uses viem/tempo extension actions for proper contract interaction
  */
 
-import { type Address, type Hash } from 'viem';
+import { type Address, type Hash, ContractFunctionExecutionError } from 'viem';
 import { getTempoClient, getPublicClientHttp, getMakerAddress } from './client.js';
 import { type TokenSymbol } from './config.js';
 import { type OrderInfo, type OrderSide, orderIdToString } from './types.js';
@@ -72,11 +72,12 @@ export async function getOrder(orderId: bigint): Promise<OrderInfo | null> {
       status: order.remaining === 0n ? 'filled' : 'open',
     };
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-
-    // OrderDoesNotExist is a valid "not found" response, not an error
-    if (errorMsg.includes('OrderDoesNotExist')) {
-      return null;
+    // Check for OrderDoesNotExist contract revert (order was filled/cancelled)
+    if (error instanceof ContractFunctionExecutionError) {
+      const cause = error.cause as { data?: { errorName?: string } } | undefined;
+      if (cause?.data?.errorName === 'OrderDoesNotExist') {
+        return null;
+      }
     }
 
     // Re-throw actual RPC/network errors
