@@ -29,6 +29,7 @@ import {
   formatQuoteParams,
   formatInventory,
   canQuotePair,
+  hasFlipBuffer,
   type QuoteParams,
 } from './strategy.js';
 import {
@@ -464,26 +465,27 @@ async function handleFlipFailure(
 ): Promise<void> {
   const key = pairKey(base, quote);
 
-  // Diagnose the issue by checking inventory
+  // Diagnose the issue by checking inventory with buffer
   const inventory = await getInventoryState(base, quote);
   const params = await getQuoteParams(base, quote);
+  const flipCheck = hasFlipBuffer(inventory, params.orderSize);
 
   let failReason = 'unknown';
 
-  // Check if internal balance is insufficient for flip
-  if (side === 'bid' && inventory.quoteDex < params.orderSize) {
+  // Check if internal balance is insufficient for flip (includes MIN_INTERNAL_BUFFER)
+  if (side === 'bid' && !flipCheck.quoteOk) {
     failReason = 'insufficientInternal_quote';
     logger.warn('engine', {
-      message: `Flip failed: insufficient ${quote} internal balance`,
+      message: `Flip failed: insufficient ${quote} internal balance (includes buffer)`,
       have: inventory.quoteDex.toString(),
-      need: params.orderSize.toString(),
+      missing: flipCheck.quoteMissing.toString(),
     });
-  } else if (side === 'ask' && inventory.baseDex < params.orderSize) {
+  } else if (side === 'ask' && !flipCheck.baseOk) {
     failReason = 'insufficientInternal_base';
     logger.warn('engine', {
-      message: `Flip failed: insufficient ${base} internal balance`,
+      message: `Flip failed: insufficient ${base} internal balance (includes buffer)`,
       have: inventory.baseDex.toString(),
-      need: params.orderSize.toString(),
+      missing: flipCheck.baseMissing.toString(),
     });
   }
 
