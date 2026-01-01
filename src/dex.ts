@@ -81,9 +81,9 @@ export async function getOrder(orderId: bigint): Promise<OrderInfo | null> {
         return null;
       }
 
-      // Fallback: check details/message for RPCs that don't parse errorName
-      const errorMsg = error.message || cause?.details || '';
-      if (errorMsg.includes('OrderDoesNotExist')) {
+      // Fallback: check both message and details for RPCs that don't parse errorName
+      const messagesToCheck = [error.message, cause?.details].filter(Boolean);
+      if (messagesToCheck.some(msg => msg?.includes('OrderDoesNotExist'))) {
         return null;
       }
     }
