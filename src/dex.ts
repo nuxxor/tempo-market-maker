@@ -42,40 +42,34 @@ export async function getDexBalance(token: TokenSymbol): Promise<bigint> {
 
 /**
  * Get order info by ID
+ * Returns null if order doesn't exist (filled/cancelled)
+ * Throws on RPC error (caller should handle)
  */
 export async function getOrder(orderId: bigint): Promise<OrderInfo | null> {
   const client = getTempoClient();
 
-  try {
-    const order = await client.dex.getOrder({
-      orderId,
-    });
+  const order = await client.dex.getOrder({
+    orderId,
+  });
 
-    // Check if order exists (maker address is zero for non-existent orders)
-    if (!order || order.maker === '0x0000000000000000000000000000000000000000') {
-      return null;
-    }
-
-    return {
-      orderId,
-      maker: order.maker,
-      baseToken: order.bookKey as Address, // bookKey represents the base token
-      quoteToken: '0x20c0000000000000000000000000000000000000' as Address, // pathUSD
-      isBid: order.isBid,
-      isFlip: order.isFlip,
-      tick: Number(order.tick),
-      flipTick: order.isFlip ? Number(order.flipTick) : null,
-      amount: order.amount,
-      remainingAmount: order.remaining,
-      status: order.remaining === 0n ? 'filled' : 'open',
-    };
-  } catch (error) {
-    logger.warn('preflight', {
-      message: `Failed to get order ${orderId}`,
-      error: error instanceof Error ? error.message : 'Unknown',
-    });
+  // Check if order exists (maker address is zero for non-existent orders)
+  if (!order || order.maker === '0x0000000000000000000000000000000000000000') {
     return null;
   }
+
+  return {
+    orderId,
+    maker: order.maker,
+    baseToken: order.bookKey as Address, // bookKey represents the base token
+    quoteToken: '0x20c0000000000000000000000000000000000000' as Address, // pathUSD
+    isBid: order.isBid,
+    isFlip: order.isFlip,
+    tick: Number(order.tick),
+    flipTick: order.isFlip ? Number(order.flipTick) : null,
+    amount: order.amount,
+    remainingAmount: order.remaining,
+    status: order.remaining === 0n ? 'filled' : 'open',
+  };
 }
 
 /**

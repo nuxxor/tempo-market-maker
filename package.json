@@ -11,8 +11,6 @@
     "fund": "tsx scripts/fund.ts",
     "balances": "tsx scripts/balances.ts",
     "approve": "tsx scripts/approve.ts",
-    "sweep": "tsx scripts/sweep.ts",
-    "monitor": "tsx scripts/monitor.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

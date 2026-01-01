@@ -452,7 +452,9 @@ async function checkOrderStatus(
 }
 
 /**
- * Handle flip failure - diagnose and recover
+ * Handle flip failure - diagnose and log
+ * Note: Tempo DEX doesn't have deposit functionality, so recovery is not possible.
+ * The flip will succeed on the next fill when internal balance is available.
  */
 async function handleFlipFailure(
   ctx: EngineContext,
@@ -462,21 +464,21 @@ async function handleFlipFailure(
 ): Promise<void> {
   const key = pairKey(base, quote);
 
-  // Diagnose the issue
+  // Diagnose the issue by checking inventory
   const inventory = await getInventoryState(base, quote);
   const params = await getQuoteParams(base, quote);
-  const flipCheck = hasFlipBuffer(inventory, params.orderSize);
 
   let failReason = 'unknown';
 
-  if (side === 'bid' && !flipCheck.quoteOk) {
+  // Check if internal balance is insufficient for flip
+  if (side === 'bid' && inventory.quoteDex < params.orderSize) {
     failReason = 'insufficientInternal_quote';
     logger.warn('engine', {
       message: `Flip failed: insufficient ${quote} internal balance`,
       have: inventory.quoteDex.toString(),
       need: params.orderSize.toString(),
     });
-  } else if (side === 'ask' && !flipCheck.baseOk) {
+  } else if (side === 'ask' && inventory.baseDex < params.orderSize) {
     failReason = 'insufficientInternal_base';
     logger.warn('engine', {
       message: `Flip failed: insufficient ${base} internal balance`,
@@ -492,31 +494,14 @@ async function handleFlipFailure(
     error: failReason,
   });
 
-  // Try to recover by depositing
-  const rebalance = await checkRebalance(base, quote);
-  if (rebalance.needed && rebalance.action && rebalance.amount) {
-    logger.info('engine', {
-      message: `Attempting recovery deposit`,
-      action: rebalance.action,
-    });
-
-    const token = rebalance.action.includes('base') ? base : quote;
-    try {
-      const result = await depositToDex(token, rebalance.amount);
-      if (result) {
-        incrementTxCounter(ctx.state, false);
-        logger.txSuccess({
-          reason: 'flipRecovery',
-          txHash: result.txHash,
-        });
-      }
-    } catch (error) {
-      logger.error('engine', {
-        message: 'Recovery deposit failed',
-        error: error instanceof Error ? error.message : 'Unknown',
-      });
-    }
-  }
+  // Note: Tempo DEX pulls directly from wallet with approval.
+  // Flip orders use internal balance which accumulates from fills.
+  // No manual deposit/recovery possible - flip will work once balance builds up.
+  logger.info('engine', {
+    message: 'Flip recovery not possible - Tempo DEX has no deposit function. Will retry on next cycle.',
+    pair: key,
+    side,
+  });
 }
 
 /**
