@@ -46,13 +46,13 @@ export const config = {
   TOTAL_SPREAD_BPS: 10,
 
   // Order size - HUMAN readable, runtime'da decimals ile parseUnits
-  ORDER_SIZE_HUMAN: '100',            // 100 base token (string!)
-  MIN_INTERNAL_BUFFER_HUMAN: '120',   // Flip için min internal balance
+  ORDER_SIZE_HUMAN: '200',            // 200 base token (string!)
+  MIN_INTERNAL_BUFFER_HUMAN: '250',   // Flip için min internal balance
 
   // Budget (genuine, spam değil)
   MAX_TX_PER_DAY: 100,
   MAX_CANCELS_PER_HOUR: 10,
-  COOLDOWN_MS: 60_000,                // Min 60 sn aynı pair için
+  COOLDOWN_MS: 120_000,               // Min 120 sn (2 dk) aynı pair için
   JITTER_MS: 5_000,                   // Fingerprint azaltma
 
   // Flip fail detection
