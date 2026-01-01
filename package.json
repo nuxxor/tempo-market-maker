@@ -1,0 +1,36 @@
+{
+  "name": "tempo-mm-engine",
+  "version": "1.0.0",
+  "description": "Reference Market Maker Engine for Tempo Stablecoin DEX",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "start:once": "tsx src/index.ts --once",
+    "fund": "tsx scripts/fund.ts",
+    "balances": "tsx scripts/balances.ts",
+    "approve": "tsx scripts/approve.ts",
+    "sweep": "tsx scripts/sweep.ts",
+    "monitor": "tsx scripts/monitor.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "tempo",
+    "stablecoin",
+    "dex",
+    "market-maker",
+    "blockchain"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "viem": "^2.43.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "tsx": "^4.19.2",
+    "@types/node": "^22.10.2"
+  }
+}
