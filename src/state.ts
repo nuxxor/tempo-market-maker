@@ -266,6 +266,7 @@ export function incrementTxCounter(state: EngineState, isCancel: boolean = false
 
 /**
  * Check if TX budget allows operation
+ * Also resets counters if new day/hour detected (to fix stuck cooldown bug)
  */
 export function checkTxBudget(state: EngineState, isCancel: boolean = false): {
   allowed: boolean;
@@ -273,27 +274,40 @@ export function checkTxBudget(state: EngineState, isCancel: boolean = false): {
   hourlyRemaining: number;
 } {
   const now = new Date();
+  let stateChanged = false;
 
-  // Check daily reset
+  // Check daily reset - ACTUALLY reset state, not just local var
   const dailyResetDate = new Date(state.txCounters.dailyResetAt);
-  let dailyCount = state.txCounters.dailyTxCount;
   if (now.getDate() !== dailyResetDate.getDate() ||
       now.getMonth() !== dailyResetDate.getMonth() ||
       now.getFullYear() !== dailyResetDate.getFullYear()) {
-    dailyCount = 0;
+    logger.info('state', {
+      message: 'New day detected, resetting daily TX counter',
+      oldCount: state.txCounters.dailyTxCount,
+      oldResetAt: state.txCounters.dailyResetAt,
+    });
+    state.txCounters.dailyTxCount = 0;
+    state.txCounters.dailyResetAt = now.toISOString();
+    stateChanged = true;
   }
 
-  // Check hourly reset
+  // Check hourly reset - ACTUALLY reset state
   const hourlyResetDate = new Date(state.txCounters.hourlyResetAt);
-  let hourlyCount = state.txCounters.hourlyCancelCount;
   const hoursDiff = (now.getTime() - hourlyResetDate.getTime()) / (1000 * 60 * 60);
   if (hoursDiff >= 1) {
-    hourlyCount = 0;
+    state.txCounters.hourlyCancelCount = 0;
+    state.txCounters.hourlyResetAt = now.toISOString();
+    stateChanged = true;
   }
 
-  const dailyRemaining = config.MAX_TX_PER_DAY - dailyCount;
+  // Save if counters were reset
+  if (stateChanged) {
+    saveState(state);
+  }
+
+  const dailyRemaining = config.MAX_TX_PER_DAY - state.txCounters.dailyTxCount;
   const hourlyRemaining = isCancel
-    ? config.MAX_CANCELS_PER_HOUR - hourlyCount
+    ? config.MAX_CANCELS_PER_HOUR - state.txCounters.hourlyCancelCount
     : Infinity;
 
   return {
