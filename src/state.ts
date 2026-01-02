@@ -224,11 +224,11 @@ export function incrementTxCounter(state: EngineState, isCancel: boolean = false
 } {
   const now = new Date();
 
-  // Reset daily counter if needed (new day)
+  // Reset daily counter if needed (new day) - use UTC to avoid timezone issues
   const dailyResetDate = new Date(state.txCounters.dailyResetAt);
-  if (now.getDate() !== dailyResetDate.getDate() ||
-      now.getMonth() !== dailyResetDate.getMonth() ||
-      now.getFullYear() !== dailyResetDate.getFullYear()) {
+  if (now.getUTCDate() !== dailyResetDate.getUTCDate() ||
+      now.getUTCMonth() !== dailyResetDate.getUTCMonth() ||
+      now.getUTCFullYear() !== dailyResetDate.getUTCFullYear()) {
     state.txCounters.dailyTxCount = 0;
     state.txCounters.dailyResetAt = now.toISOString();
   }
@@ -277,10 +277,11 @@ export function checkTxBudget(state: EngineState, isCancel: boolean = false): {
   let stateChanged = false;
 
   // Check daily reset - ACTUALLY reset state, not just local var
+  // Use UTC methods to avoid timezone issues!
   const dailyResetDate = new Date(state.txCounters.dailyResetAt);
-  if (now.getDate() !== dailyResetDate.getDate() ||
-      now.getMonth() !== dailyResetDate.getMonth() ||
-      now.getFullYear() !== dailyResetDate.getFullYear()) {
+  if (now.getUTCDate() !== dailyResetDate.getUTCDate() ||
+      now.getUTCMonth() !== dailyResetDate.getUTCMonth() ||
+      now.getUTCFullYear() !== dailyResetDate.getUTCFullYear()) {
     logger.info('state', {
       message: 'New day detected, resetting daily TX counter',
       oldCount: state.txCounters.dailyTxCount,
