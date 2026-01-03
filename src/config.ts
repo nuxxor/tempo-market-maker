@@ -50,7 +50,7 @@ export const config = {
   MIN_INTERNAL_BUFFER_HUMAN: '250',   // Flip için min internal balance
 
   // Budget (genuine, spam değil)
-  MAX_TX_PER_DAY: 100,
+  MAX_TX_PER_DAY: 150,
   MAX_CANCELS_PER_HOUR: 10,
   COOLDOWN_MS: 120_000,               // Min 120 sn (2 dk) aynı pair için
   JITTER_MS: 5_000,                   // Fingerprint azaltma
